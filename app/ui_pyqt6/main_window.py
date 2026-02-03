@@ -92,7 +92,7 @@ def _icon_from_fs(name: str) -> QIcon:
     def _on_friends_changed(self, friends: list[str]) -> None:
         """Persist friends, push to bridge MONITOR, and resync presence maps."""
         try:
-            s = QSettings("DeadHop", "DeadHopClient")
+            s = QSettings("DebauchedTea", "DebauchedTeaClient")
             s.setValue("friends", list(friends or []))
         except Exception:
             pass
@@ -126,7 +126,7 @@ def _icon_from_fs(name: str) -> QIcon:
                 pass
             # Persist
             try:
-                s = QSettings("DeadHop", "DeadHopClient")
+                s = QSettings("DebauchedTea", "DebauchedTeaClient")
                 s.setValue("avatars", dict(self._avatar_map))
             except Exception:
                 pass
@@ -246,7 +246,7 @@ def get_icon(names: list[str] | tuple[str, ...], awesome_fallback: str | None = 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("DeadHop")
+        self.setWindowTitle("DebauchedTea")
         self.resize(1200, 800)
         self.bridge = BridgeQt()
         # In-memory scrollback per channel/label -> list[HTML]
@@ -337,7 +337,7 @@ class MainWindow(QMainWindow):
             self._se_hl = QSoundEffect(self)
             self._se_presence = QSoundEffect(self)
             try:
-                s = QSettings("DeadHop", "DeadHopClient")
+                s = QSettings("DebauchedTea", "DebauchedTeaClient")
                 msg_path = s.value("notify/sound_msg", "", str)
                 hl_path = s.value("notify/sound_hl", "", str)
                 pr_path = s.value("notify/sound_presence", "", str)
@@ -418,17 +418,13 @@ class MainWindow(QMainWindow):
         root_v.setContentsMargins(0, 0, 0, 0)
         root_v.setSpacing(0)
 
-        # Set window/app icon from resources/icons if available
+        # Prefer the application icon (set by main entrypoint); fallback to resource icons
         try:
-            icons_dir = Path(__file__).resolve().parents[1] / "resources" / "icons"
-            cand = None
-            for ext in (".ico", ".png", ".svg"):  # prefer .ico
-                found = list(icons_dir.glob(f"*{ext}"))
-                if found:
-                    cand = found[0]
-                    break
-            if cand is not None:
-                self.setWindowIcon(QIcon(str(cand)))
+            app = QApplication.instance()
+            if app is not None:
+                ic = app.windowIcon()
+                if ic is not None and not ic.isNull():
+                    self.setWindowIcon(ic)
         except Exception:
             pass
 
@@ -507,38 +503,57 @@ class MainWindow(QMainWindow):
         self.members = MembersView()
         self.members.memberAction.connect(self._on_member_action)
 
-        # Splitter layout
-        self.split_lr = QSplitter(Qt.Orientation.Horizontal)
-        self.split_lr.addWidget(self.sidebar_panel)
-        self.split_lr.addWidget(self.split_chat)
-        self.split_lr.addWidget(self.members)
-        self.split_lr.setStretchFactor(0, 0)
-        self.split_lr.setStretchFactor(1, 1)
-        self.split_lr.setStretchFactor(2, 0)
-        self.split_lr.setSizes([240, 800, 240])
-        # Ensure member context menu actions are handled
-        try:
-            self.members.memberAction.connect(self._on_member_action)
-        except Exception:
-            pass
+        # Make Channels and Members true dock widgets (dockable/resizable)
+        self.channels_dock = QDockWidget("Channels", self)
+        self.channels_dock.setObjectName("channels_dock")
+        self.channels_dock.setWidget(self.sidebar_panel)
+        self.channels_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.channels_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+            | QDockWidget.DockWidgetFeature.DockWidgetClosable
+        )
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.channels_dock)
 
-        # Assemble center
+        self.members_dock = QDockWidget("Members", self)
+        self.members_dock.setObjectName("members_dock")
+        self.members_dock.setWidget(self.members)
+        self.members_dock.setAllowedAreas(
+            Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
+        )
+        self.members_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+            | QDockWidget.DockWidgetFeature.DockWidgetClosable
+        )
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.members_dock)
+
+        # Center: chat + composer
         center = QWidget()
         center_v = QVBoxLayout(center)
         center_v.setContentsMargins(8, 8, 8, 8)
         center_v.setSpacing(8)
-        center_v.addWidget(self.split_lr, 1)
+        center_v.addWidget(self.split_chat, 1)
         center_v.addWidget(self.composer, 0)
-
         root_v.addWidget(center)
 
         # Status bar + toast host
         self.status = QStatusBar(self)
         self.setStatusBar(self.status)
         self.toast_host = ToastHost(self)
+        
+        # Enable dock nesting for better layout flexibility
+        self.setDockNestingEnabled(True)
+        # Set corner behavior for dock widgets
+        self.setCorner(Qt.Corner.TopLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.setCorner(Qt.Corner.TopRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomLeftCorner, Qt.DockWidgetArea.LeftDockWidgetArea)
+        self.setCorner(Qt.Corner.BottomRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
         # Notification preferences (default ON); load from QSettings
         try:
-            s = QSettings("DeadHop", "DeadHopClient")
+            s = QSettings("DebauchedTea", "DebauchedTeaClient")
             self._notify_toast: bool = bool(s.value("notify/toast", True, bool))
             self._notify_tray: bool = bool(s.value("notify/tray", True, bool))
             self._notify_sound: bool = bool(s.value("notify/sound", True, bool))
@@ -560,6 +575,10 @@ class MainWindow(QMainWindow):
         self.log_view.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.log_dock = QDockWidget("IRC Log", self)
         self.log_dock.setWidget(self.log_view)
+        self.log_dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.TopDockWidgetArea)
+        self.log_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | 
+                                 QDockWidget.DockWidgetFeature.DockWidgetFloatable |
+                                 QDockWidget.DockWidgetFeature.DockWidgetClosable)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
         self.log_dock.hide()
 
@@ -584,6 +603,10 @@ class MainWindow(QMainWindow):
         self.url_grabber = URLGrabber(self)
         self.url_dock = QDockWidget("URLs", self)
         self.url_dock.setWidget(self.url_grabber)
+        self.url_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.url_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | 
+                               QDockWidget.DockWidgetFeature.DockWidgetFloatable |
+                               QDockWidget.DockWidgetFeature.DockWidgetClosable)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.url_dock)
 
         # Quick toolbar (top-left): font slider + quick settings
@@ -593,14 +616,22 @@ class MainWindow(QMainWindow):
             pass
         self.url_dock.hide()
 
-        # Standalone in-app browser window (created lazily)
-        self.browser_window = None
+        # Dockable in-app browser panel
+        self.browser_home_url = "https://debauchedtea.party/"
+        self.browser_dock = None
+        self.browser_view = None
+        self.browser_url_bar = None
+        self._show_browser_dock: bool = True
 
         # Find bar dock
         self.find_bar = FindBar(self)
         self.find_bar.searchRequested.connect(self._on_find)
         self.find_dock = QDockWidget("Find", self)
         self.find_dock.setWidget(self.find_bar)
+        self.find_dock.setAllowedAreas(Qt.DockWidgetArea.BottomDockWidgetArea | Qt.DockWidgetArea.TopDockWidgetArea)
+        self.find_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | 
+                                QDockWidget.DockWidgetFeature.DockWidgetFloatable |
+                                QDockWidget.DockWidgetFeature.DockWidgetClosable)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.find_dock)
         self.find_dock.hide()
 
@@ -608,6 +639,10 @@ class MainWindow(QMainWindow):
         self.friends = FriendsDock(self)
         self.friends_dock = QDockWidget("Friends", self)
         self.friends_dock.setWidget(self.friends)
+        self.friends_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        self.friends_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable | 
+                                  QDockWidget.DockWidgetFeature.DockWidgetFloatable |
+                                  QDockWidget.DockWidgetFeature.DockWidgetClosable)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.friends_dock)
         self.friends_dock.hide()
         # Avatars and presence caches
@@ -631,14 +666,15 @@ class MainWindow(QMainWindow):
                 available = True
             if available:
                 self.tray = QSystemTrayIcon(self)
-                app_icon = (
-                    get_icon(["app", "logo", "deadhop"]) if "get_icon" in globals() else QIcon()
-                )
-                if not app_icon.isNull():
-                    self.tray.setIcon(app_icon)
+                try:
+                    ic = self.windowIcon()
+                    if ic is not None and not ic.isNull():
+                        self.tray.setIcon(ic)
+                except Exception:
+                    pass
                 # Basic tray setup: tooltip and visibility
                 try:
-                    self.tray.setToolTip("DeadHop")
+                    self.tray.setToolTip("DebauchedTea")
                 except Exception:
                     pass
                 # Context menu (Show / Hide / Quit)
@@ -757,7 +793,7 @@ class MainWindow(QMainWindow):
         try:
             # Load persisted scrollback retention first (override defaults)
             try:
-                s = QSettings("DeadHop", "DeadHopClient")
+                s = QSettings("DebauchedTea", "DebauchedTeaClient")
                 try:
                     self._scrollback_ttl_days = int(
                         s.value("scrollback/ttl_days", self._scrollback_ttl_days)
@@ -1145,46 +1181,120 @@ class MainWindow(QMainWindow):
         )
 
     def _show_browser_panel(self) -> None:
-        self._ensure_browser_window()
-        if not self.browser_window:
-            return
+        self._ensure_browser_dock()
         try:
-            self.browser_window.show()
-            self.browser_window.raise_()
-            self.browser_window.activateWindow()
+            if self.browser_dock is not None:
+                self.browser_dock.show()
+                self.browser_dock.raise_()
         except Exception:
             pass
 
     def _import_system_cookies_for_current_site(self) -> None:
         try:
-            self._ensure_browser_window()
-            if not self.browser_window:
+            self._ensure_browser_dock()
+            if self.browser_view is None:
                 self.toast_host.show_toast("Browser panel unavailable")
                 return
-            url = self.browser_window.view.url()
+            url = self.browser_view.url()
             host = url.host()
             if not host:
                 self.toast_host.show_toast("Open a site in the Browser first")
                 return
             # Import cookies for this domain
-            n = self.browser_window.import_cookies_from_system(domain=host)
+            n = 0
             if n > 0:
                 self.status.showMessage(f"Imported {n} cookies for {host}", 2500)
                 # Reload to apply
-                self.browser_window.view.reload()
+                self.browser_view.reload()
             else:
                 self.toast_host.show_toast("No cookies imported (install browser-cookie3?)")
         except Exception:
             self.toast_host.show_toast("Cookie import failed")
 
-    def _ensure_browser_window(self) -> None:
-        if self.browser_window is None:
-            try:
-                from .widgets.browser_window import BrowserWindow
+    def _ensure_browser_dock(self) -> None:
+        if getattr(self, "browser_dock", None) is not None:
+            return
+        try:
+            from PyQt6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton
+            from PyQt6.QtWebEngineWidgets import QWebEngineView  # type: ignore
 
-                self.browser_window = BrowserWindow(self)
-            except Exception:
-                self.browser_window = None
+            container = QWidget(self)
+            v = QVBoxLayout(container)
+            v.setContentsMargins(0, 0, 0, 0)
+            v.setSpacing(4)
+
+            top = QWidget(container)
+            hb = QHBoxLayout(top)
+            hb.setContentsMargins(6, 6, 6, 6)
+            hb.setSpacing(6)
+
+            btn_back = QPushButton("←", top)
+            btn_fwd = QPushButton("→", top)
+            btn_reload = QPushButton("⟳", top)
+            btn_home = QPushButton("Home", top)
+            url_bar = QLineEdit(top)
+            url_bar.setPlaceholderText("Enter URL…")
+
+            hb.addWidget(btn_back)
+            hb.addWidget(btn_fwd)
+            hb.addWidget(btn_reload)
+            hb.addWidget(btn_home)
+            hb.addWidget(url_bar, 1)
+            v.addWidget(top, 0)
+
+            view = QWebEngineView(container)
+            v.addWidget(view, 1)
+
+            dock = QDockWidget("Browser", self)
+            dock.setObjectName("browser_dock")
+            dock.setWidget(container)
+            dock.setAllowedAreas(
+                Qt.DockWidgetArea.LeftDockWidgetArea
+                | Qt.DockWidgetArea.RightDockWidgetArea
+                | Qt.DockWidgetArea.BottomDockWidgetArea
+                | Qt.DockWidgetArea.TopDockWidgetArea
+            )
+            dock.setFeatures(
+                QDockWidget.DockWidgetFeature.DockWidgetMovable
+                | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+                | QDockWidget.DockWidgetFeature.DockWidgetClosable
+            )
+            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+
+            self.browser_dock = dock
+            self.browser_view = view
+            self.browser_url_bar = url_bar
+
+            def _norm(text: str) -> str:
+                t = (text or "").strip()
+                if not t:
+                    return ""
+                if not (t.startswith("http://") or t.startswith("https://")):
+                    t = "https://" + t
+                return t
+
+            def _go(text: str) -> None:
+                t = _norm(text)
+                if not t:
+                    return
+                try:
+                    view.setUrl(QUrl(t))
+                except Exception:
+                    pass
+
+            url_bar.returnPressed.connect(lambda: _go(url_bar.text()))
+            btn_back.clicked.connect(view.back)
+            btn_fwd.clicked.connect(view.forward)
+            btn_reload.clicked.connect(view.reload)
+            btn_home.clicked.connect(lambda: _go(self.browser_home_url))
+            view.urlChanged.connect(lambda u: url_bar.setText(u.toString()))
+
+            # Default URL on creation
+            _go(self.browser_home_url)
+        except Exception:
+            self.browser_dock = None
+            self.browser_view = None
+            self.browser_url_bar = None
 
     def _reset_browser_profile(self) -> None:
         """Delete the persistent internal browser profile and reset the browser.
@@ -1193,63 +1303,64 @@ class MainWindow(QMainWindow):
         profile directory at app/resources/qtweb/browser, and defers
         re-creation until the browser panel is next requested.
         """
-        # 1) Close/hide the window safely
+        # For the docked browser we don't keep a custom persistent profile.
+        # Best-effort: navigate home and clear the view.
         try:
-            if self.browser_window is not None:
-                try:
-                    self.browser_window.hide()
-                except Exception:
-                    pass
-                try:
-                    self.browser_window.deleteLater()
-                except Exception:
-                    pass
-                self.browser_window = None
-        except Exception:
-            pass
-        # 2) Remove the persistent profile dir used by the in-app browser
-        try:
-            base = Path(__file__).resolve().parents[1] / "resources" / "qtweb" / "browser"
-            # Best-effort removal (profile should be closed from step 1)
-            shutil.rmtree(base, ignore_errors=True)
-            # Recreate empty folder to avoid surprises on next launch
-            try:
-                base.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                pass
-            self.status.showMessage("Browser profile reset", 2500)
-            try:
-                self.toast_host.show_toast(
-                    "Browser profile reset. Open Browser panel to reinitialize."
-                )
-            except Exception:
-                pass
+            self._ensure_browser_dock()
+            if self.browser_view is not None:
+                self.browser_view.setUrl(QUrl("about:blank"))
+                self.browser_view.setUrl(QUrl(self.browser_home_url))
+            self.status.showMessage("Browser reset", 2500)
         except Exception:
             try:
-                self.toast_host.show_toast("Failed to reset browser profile")
+                self.toast_host.show_toast("Failed to reset browser")
             except Exception:
                 pass
 
     def _toggle_browser_panel(self) -> None:
-        self._ensure_browser_window()
-        if not self.browser_window:
+        self._ensure_browser_dock()
+        if not self.browser_dock:
             return
-        if self.browser_window.isVisible():
-            self.browser_window.hide()
+        if self.browser_dock.isVisible():
+            self.browser_dock.hide()
+            try:
+                self._show_browser_dock = False
+            except Exception:
+                pass
         else:
-            self.browser_window.show()
+            self.browser_dock.show()
+            try:
+                self._show_browser_dock = True
+            except Exception:
+                pass
+        try:
+            self._save_settings()
+        except Exception:
+            pass
 
     def _open_internal_browser(self, url: str | QUrl) -> None:
         """Open a URL in the in-app browser window."""
         try:
-            self._ensure_browser_window()
-            if self.browser_window:
-                self.browser_window.open_url(url)
+            self._ensure_browser_dock()
+            if self.browser_dock is not None:
+                try:
+                    self.browser_dock.show()
+                except Exception:
+                    pass
+            if self.browser_view is not None:
+                if isinstance(url, QUrl):
+                    self.browser_view.setUrl(url)
+                else:
+                    u = str(url or "").strip()
+                    if u and not (u.startswith("http://") or u.startswith("https://")):
+                        u = "https://" + u
+                    if u:
+                        self.browser_view.setUrl(QUrl(u))
         except Exception:
             pass
 
     def _build_menus(self) -> None:
-        """Build full menu bar: File, Servers, View, Tools, Help."""
+        """Build full menu bar."""
         try:
             mb = self.menuBar()
             mb.clear()
@@ -1257,8 +1368,11 @@ class MainWindow(QMainWindow):
             # File
             m_file = mb.addMenu("&File")
             a_connect = m_file.addAction("&Connect…")
-            a_connect.setShortcut(QKeySequence.StandardKey.AddTab)
+            a_connect.setShortcut(QKeySequence("Ctrl+N"))
             a_connect.triggered.connect(self._open_connect_dialog)
+            a_connect_saved = m_file.addAction("Connect to &Saved…")
+            a_connect_saved.setShortcut(QKeySequence("Ctrl+Shift+C"))
+            a_connect_saved.triggered.connect(self._servers_connect)
             m_file.addSeparator()
             a_quit = m_file.addAction("E&xit")
             a_quit.setShortcut(QKeySequence.StandardKey.Quit)
@@ -1266,6 +1380,15 @@ class MainWindow(QMainWindow):
                 a_quit.triggered.connect(self.close)
             except Exception:
                 pass
+
+            # Edit
+            m_edit = mb.addMenu("&Edit")
+            a_find = m_edit.addAction("&Find…")
+            a_find.setShortcut(QKeySequence.StandardKey.Find)
+            a_find.triggered.connect(lambda: self.find_dock.show())
+            m_edit.addSeparator()
+            a_clear_hist = m_edit.addAction("Clear Channel &History…")
+            a_clear_hist.triggered.connect(self._clear_current_channel_history)
 
             # Servers
             m_srv = mb.addMenu("&Servers")
@@ -1276,8 +1399,8 @@ class MainWindow(QMainWindow):
             a_srv_delete = m_srv.addAction("&Delete…")
             a_srv_delete.triggered.connect(self._servers_delete_prompt)
             m_srv.addSeparator()
-            a_srv_connect = m_srv.addAction("&Connect to Saved…")
-            a_srv_connect.setShortcut(QKeySequence("Ctrl+Shift+C"))
+            a_srv_connect = m_srv.addAction("&Connect…")
+            a_srv_connect.setShortcut(QKeySequence("Ctrl+Shift+S"))
             a_srv_connect.triggered.connect(self._servers_connect)
             a_srv_autoc = m_srv.addAction("Set &Auto-connect…")
             a_srv_autoc.triggered.connect(self._servers_set_autoconnect)
@@ -1286,9 +1409,16 @@ class MainWindow(QMainWindow):
 
             # View
             m_view = mb.addMenu("&View")
-            a_view_browser = m_view.addAction("Open &Browser Panel")
-            a_view_browser.triggered.connect(self._show_browser_panel)
-            a_view_toggle = m_view.addAction("&Toggle Browser Panel")
+            try:
+                self.act_quick_bar = m_view.addAction("&Quick Bar")
+                self.act_quick_bar.setCheckable(True)
+                self.act_quick_bar.setChecked(bool(getattr(self, "_show_quick_toolbar", False)))
+                self.act_quick_bar.triggered.connect(self._toggle_quick_toolbar)
+                m_view.addSeparator()
+            except Exception:
+                pass
+            a_view_toggle = m_view.addAction("&Browser Panel")
+            a_view_toggle.setShortcut(QKeySequence("Ctrl+B"))
             a_view_toggle.triggered.connect(self._toggle_browser_panel)
             a_view_reset = m_view.addAction("&Reset Browser Profile")
             a_view_reset.triggered.connect(self._reset_browser_profile)
@@ -1301,9 +1431,30 @@ class MainWindow(QMainWindow):
             a_view_friends.triggered.connect(lambda: self.friends_dock.show())
             a_view_log = m_view.addAction("Show &IRC Log")
             a_view_log.triggered.connect(lambda: self.log_dock.show())
-            a_view_find = m_view.addAction("&Find…")
-            a_view_find.setShortcut(QKeySequence.StandardKey.Find)
-            a_view_find.triggered.connect(lambda: self.find_dock.show())
+            try:
+                a_view_channels = m_view.addAction("Show &Channels")
+                a_view_channels.triggered.connect(lambda: self.channels_dock.show())
+            except Exception:
+                pass
+            try:
+                a_view_members = m_view.addAction("Show &Members")
+                a_view_members.triggered.connect(lambda: self.members_dock.show())
+            except Exception:
+                pass
+
+            # IRC
+            m_irc = mb.addMenu("&IRC")
+            a_join = m_irc.addAction("&Join Channel…")
+            a_join.setShortcut(QKeySequence("Ctrl+J"))
+            a_join.triggered.connect(lambda: self._join_channel(""))
+            a_part = m_irc.addAction("&Part Channel")
+            a_part.setShortcut(QKeySequence("Ctrl+Shift+J"))
+            a_part.triggered.connect(lambda: self._handle_command("/part", self.bridge.current_channel() or ""))
+            m_irc.addSeparator()
+            a_topic = m_irc.addAction("Set &Topic…")
+            a_topic.triggered.connect(lambda: self._handle_command("/topic ", self.bridge.current_channel() or ""))
+            a_modes = m_irc.addAction("Set &Modes…")
+            a_modes.triggered.connect(lambda: self._handle_command("/mode ", self.bridge.current_channel() or ""))
 
             # Tools
             m_tools = mb.addMenu("&Tools")
@@ -1318,10 +1469,7 @@ class MainWindow(QMainWindow):
             a_settings = m_tools.addAction("&Settings…")
             a_settings.setShortcut(QKeySequence.StandardKey.Preferences)
             a_settings.triggered.connect(self._open_settings_dialog)
-            # History tools
             m_tools.addSeparator()
-            a_clear_hist = m_tools.addAction("&Clear Current Channel History…")
-            a_clear_hist.triggered.connect(self._clear_current_channel_history)
             a_prune_now = m_tools.addAction("&Prune Scrollback Now")
             a_prune_now.triggered.connect(self._prune_scrollback)
 
@@ -1345,6 +1493,30 @@ class MainWindow(QMainWindow):
             s = url.toString()
         except Exception:
             s = ""
+        
+        # Check if this link should open directly in browser (e.g., YouTube fallback cards)
+        try:
+            # Get the page and check if the clicked element has data-open-browser attribute
+            page = self.chat.page()
+            if page:
+                # Use JavaScript to check the clicked element
+                js = """
+                (function() {
+                    try {
+                        const element = document.activeElement || document.querySelector('a:hover');
+                        if (element && element.getAttribute('data-open-browser') === 'true') {
+                            return 'direct-browser';
+                        }
+                    } catch (e) {}
+                    return null;
+                })();
+                """
+                page.runJavaScript(js, lambda result: self._handle_link_result(result, url))
+                return
+        except Exception:
+            pass
+        
+        # Original YouTube video panel logic
         vid = self._youtube_id(s) if s else None
         if vid and hasattr(self, "video_panel") and self.video_panel:
             try:
@@ -1354,11 +1526,66 @@ class MainWindow(QMainWindow):
                 pass
         # Fallback to browser window
         try:
-            self._ensure_browser_window()
-            if self.browser_window:
-                self.browser_window.open_url(url)
+            self._ensure_browser_dock()
+            if self.browser_dock is not None:
+                self.browser_dock.show()
+            if self.browser_view is not None:
+                if isinstance(url, QUrl):
+                    self.browser_view.setUrl(url)
+                else:
+                    u = str(url or "").strip()
+                    if u and not (u.startswith("http://") or u.startswith("https://")):
+                        u = "https://" + u
+                    if u:
+                        self.browser_view.setUrl(QUrl(u))
         except Exception:
             pass
+
+    def _handle_link_result(self, result: str | None, url: QUrl) -> None:
+        """Handle the result of JavaScript check for link attributes."""
+        if result == 'direct-browser':
+            # Open directly in browser
+            try:
+                self._ensure_browser_dock()
+                if self.browser_dock is not None:
+                    self.browser_dock.show()
+                if self.browser_view is not None:
+                    if isinstance(url, QUrl):
+                        self.browser_view.setUrl(url)
+                    else:
+                        u = str(url or "").strip()
+                        if u and not (u.startswith("http://") or u.startswith("https://")):
+                            u = "https://" + u
+                        if u:
+                            self.browser_view.setUrl(QUrl(u))
+            except Exception:
+                pass
+        else:
+            # Use original logic for YouTube videos
+            try:
+                s = url.toString()
+                vid = self._youtube_id(s) if s else None
+                if vid and hasattr(self, "video_panel") and self.video_panel:
+                    try:
+                        self.video_panel.play_youtube_id(vid)
+                        return
+                    except Exception:
+                        pass
+                # Fallback to browser window
+                self._ensure_browser_dock()
+                if self.browser_dock is not None:
+                    self.browser_dock.show()
+                if self.browser_view is not None:
+                    if isinstance(url, QUrl):
+                        self.browser_view.setUrl(url)
+                    else:
+                        u = str(url or "").strip()
+                        if u and not (u.startswith("http://") or u.startswith("https://")):
+                            u = "https://" + u
+                        if u:
+                            self.browser_view.setUrl(QUrl(u))
+            except Exception:
+                pass
 
     # ----- Formatting helpers -----
     _URL_RE = re.compile(r"(https?://\S+)")
@@ -1401,11 +1628,31 @@ class MainWindow(QMainWindow):
                 continue
             yid = self._youtube_id(url)
             if yid:
+                # Always provide a fallback card that opens in the internal browser.
+                # Some videos disable embedding; in that case the iframe will show a
+                # "Watch on YouTube" screen. The link below keeps the UX smooth.
+                watch_url = f"https://www.youtube.com/watch?v={yid}"
+                thumb_url = f"https://i.ytimg.com/vi/{yid}/hqdefault.jpg"
                 embeds.append(
                     "<br>"
-                    f"<iframe data-msize='small' width='560' height='315' src='https://www.youtube.com/embed/{yid}'"
+                    f"<a href='{watch_url}' data-open-browser='true' style='text-decoration:none'>"
+                    "<div class='embed yt' style='display:flex; gap:10px; align-items:center; "
+                    " padding:10px; border-radius:10px; background:rgba(0,0,0,0.18); cursor:pointer;'>"
+                )
+                embeds.append(
+                    f"<img src='{thumb_url}' style='width:168px; height:94px; border-radius:8px; object-fit:cover;'>"
+                    "<div style='display:flex; flex-direction:column; gap:6px'>"
+                    "<div style='font-weight:600'>YouTube</div>"
+                    "<div style='opacity:0.9'>Click to open in Browser panel</div>"
+                    "</div></div></a>"
+                )
+                embeds.append(
+                    "<br>"
+                    f"<iframe data-msize='small' width='560' height='315' "
+                    f"src='https://www.youtube-nocookie.com/embed/{yid}?rel=0&modestbranding=1&playsinline=1&enablejsapi=1&origin=https%3A%2F%2Fdeadhop.local'"
                     " title='YouTube video player' frameborder='0'"
-                    " allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture'"
+                    " referrerpolicy='origin-when-cross-origin'"
+                    " allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share'"
                     " allowfullscreen></iframe>"
                 )
                 embedded_urls.append(url)
@@ -1515,17 +1762,38 @@ class MainWindow(QMainWindow):
                     --bg3: #0f1220;
                     --fg:  #e0e0e0;
                     --link: #82b1ff;
+                    --accent: #82b1ff;
+                    --nick-glow: rgba(130, 177, 255, 0.4);
+                    --msg-bg: rgba(15, 15, 20, 0.55);
+                    --msg-border: rgba(255,255,255,0.06);
+                    --topic-bg: rgba(0,0,0,0.25);
                 }
                 body {
                     margin: 0; font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
                     background: linear-gradient(135deg, var(--bg1) 0%, var(--bg2) 50%, var(--bg3) 100%);
                     color: var(--fg);
+                    transition: background 0.5s ease;
                 }
-                #topic { position: sticky; top: 0; z-index: 5; padding: 10px 14px; background: rgba(0,0,0,.25); border-bottom: 1px solid rgba(255,255,255,.06); font-weight: 600; letter-spacing: .2px; }
+                body.theme-transition {
+                    animation: themeFade 0.6s ease;
+                }
+                @keyframes themeFade {
+                    0% { filter: brightness(1.3) saturate(0.7); }
+                    100% { filter: brightness(1) saturate(1); }
+                }
+                #topic { 
+                    position: sticky; top: 0; z-index: 5; padding: 10px 14px; 
+                    background: var(--topic-bg, rgba(0,0,0,.25)); 
+                    border-bottom: 1px solid var(--msg-border, rgba(255,255,255,.06)); 
+                    font-weight: 600; letter-spacing: .2px;
+                    backdrop-filter: blur(8px);
+                    transition: all 0.3s ease;
+                }
                 #topic .label { opacity: .7; margin-right: 6px; font-weight: 500; }
                 #chat { padding: 12px 14px; }
-                a { color: var(--link); text-decoration: none; position: relative; }
-                a:after { content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 2px; background: linear-gradient(90deg, var(--link), #a78bfa); transform: scaleX(0); transition: transform .25s ease; transform-origin: left; }
+                a { color: var(--link); text-decoration: none; position: relative; transition: color 0.2s ease; }
+                a:after { content: ""; position: absolute; left: 0; right: 0; bottom: -2px; height: 2px; background: linear-gradient(90deg, var(--link), var(--accent, #a78bfa)); transform: scaleX(0); transition: transform .25s ease; transform-origin: left; }
+                a:hover { color: var(--accent, #a78bfa); }
                 a:hover:after { transform: scaleX(1); }
                 /* Default media smaller */
                     img, iframe, video { max-width: 320px; border-radius: 10px; box-shadow: 0 6px 20px rgba(0,0,0,.35); transition: transform .2s ease, box-shadow .2s ease; }
@@ -1539,15 +1807,30 @@ class MainWindow(QMainWindow):
                         margin: 8px 0;
                         padding: 8px 10px;
                         border-radius: 10px;
-                        background: rgba(15, 15, 20, 0.55);
-                        /* Removed backdrop blur to avoid flicker */
-                        border: 1px solid rgba(255,255,255,0.06);
-                        box-shadow: 0 6px 20px rgba(0,0,0,.35);
-                        transition: background .2s ease, box-shadow .2s ease;
+                        background: var(--msg-bg, rgba(15, 15, 20, 0.55));
+                        border: 1px solid var(--msg-border, rgba(255,255,255,0.06));
+                        box-shadow: 0 6px 20px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,0.02);
+                        transition: all 0.25s ease;
+                        position: relative;
+                        overflow: hidden;
                     }
-                    .msg:hover { background: rgba(15, 15, 20, 0.68); box-shadow: 0 10px 28px rgba(0,0,0,.45); }
+                    .msg::before {
+                        content: "";
+                        position: absolute;
+                        top: 0; left: 0; right: 0; height: 1px;
+                        background: linear-gradient(90deg, transparent, var(--accent, rgba(255,255,255,0.1)), transparent);
+                        opacity: 0;
+                        transition: opacity 0.3s ease;
+                    }
+                    .msg:hover { 
+                        background: rgba(15, 15, 20, 0.68); 
+                        box-shadow: 0 10px 28px rgba(0,0,0,.45), 0 0 0 1px var(--accent, rgba(255,255,255,0.08));
+                        transform: translateY(-1px);
+                    }
+                    .msg:hover::before { opacity: 1; }
                     .ts { color: #8a8a8a; margin-right: 6px; }
-                    .nick { font-weight: 700; color: var(--nick); text-shadow: 0 0 8px color-mix(in oklab, var(--nick) 40%, transparent); }
+                    .nick { font-weight: 700; color: var(--nick); text-shadow: 0 0 8px var(--nick-glow, color-mix(in oklab, var(--nick) 40%, transparent)); transition: text-shadow 0.3s ease; }
+                    .msg:hover .nick { text-shadow: 0 0 12px var(--nick-glow, color-mix(in oklab, var(--nick) 60%, transparent)); }
                     :root { --fg: #d8d8d8; --accent: #82b1ff; }
                     .msg-text {
                         color: var(--fg, #e2e2e2);
@@ -1719,6 +2002,33 @@ class MainWindow(QMainWindow):
                         if (s) { s.textContent = (s.textContent || '') + t; scrollToBottom(); }
                     } catch (e) {}
                 }
+                function applyThemeVars(vars) {
+                    try {
+                        if (!vars) return;
+                        const root = document.documentElement;
+                        const body = document.body;
+                        // Apply CSS variables
+                        if (vars.bg1) root.style.setProperty('--bg1', vars.bg1);
+                        if (vars.bg2) root.style.setProperty('--bg2', vars.bg2);
+                        if (vars.bg3) root.style.setProperty('--bg3', vars.bg3);
+                        if (vars.fg) root.style.setProperty('--fg', vars.fg);
+                        if (vars.link) {
+                            root.style.setProperty('--link', vars.link);
+                            root.style.setProperty('--accent', vars.link);
+                        }
+                        if (vars.accent) root.style.setProperty('--accent', vars.accent);
+                        // Compute derived colors
+                        if (vars.link) {
+                            const rgba = vars.link + '66'; // 40% opacity
+                            root.style.setProperty('--nick-glow', rgba);
+                        }
+                        // Trigger theme transition animation
+                        body.classList.add('theme-transition');
+                        setTimeout(() => {
+                            body.classList.remove('theme-transition');
+                        }, 600);
+                    } catch (e) {}
+                }
                 </script>
             </body>
             </html>
@@ -1774,7 +2084,9 @@ class MainWindow(QMainWindow):
                 self.chat.loadFinished.connect(self._on_chat_loaded)
             except Exception:
                 pass
-            self.chat.setHtml(base_html, QUrl("about:blank"))
+            # Use a stable HTTPS base URL so embedded content (e.g. YouTube) has a valid origin.
+            # This is not a real network fetch; it only establishes document origin.
+            self.chat.setHtml(base_html, QUrl("https://deadhop.local/"))
         except Exception:
             pass
 
@@ -1823,7 +2135,7 @@ class MainWindow(QMainWindow):
         Channel override takes precedence; network default otherwise. Defaults to False.
         """
         try:
-            s = QSettings("DeadHop", "DeadHopClient")
+            s = QSettings("DebauchedTea", "DebauchedTeaClient")
             # Channel-specific
             val = s.value(f"decorations/chan/{comp}")
             if val is not None:
@@ -1859,15 +2171,58 @@ class MainWindow(QMainWindow):
             return ""
 
     def _apply_chat_theme(self) -> None:
+        """Apply theme colors to chat webview with dramatic preset variations."""
         try:
-            palette = self.palette()
-            bg1 = palette.color(QPalette.ColorRole.Base).name()
-            bg2 = palette.color(QPalette.ColorRole.AlternateBase).name()
-            bg3 = palette.color(QPalette.ColorRole.ToolTipBase).name()
-            fg = palette.color(QPalette.ColorRole.Text).name()
-            link = palette.color(QPalette.ColorRole.Link).name()
-            js = f"applyThemeVars({{{'bg1': '{bg1}', 'bg2': '{bg2}', 'bg3': '{bg3}', 'fg': '{fg}', 'link': '{link}'}}})"
-            self.chat.page().runJavaScript(js)
+            # Theme presets for distinct visual impact
+            presets = {
+                "Material Dark": {
+                    "bg1": "#0f0f13", "bg2": "#141824", "bg3": "#0f1220",
+                    "fg": "#e0e0e0", "link": "#82b1ff", "accent": "#82b1ff"
+                },
+                "Material Light": {
+                    "bg1": "#f5f5f7", "bg2": "#e8e8ec", "bg3": "#d0d0d8",
+                    "fg": "#1a1a1a", "link": "#0066cc", "accent": "#2196f3"
+                },
+                "Midnight": {
+                    "bg1": "#050508", "bg2": "#0a0a10", "bg3": "#0d0d15",
+                    "fg": "#c0c0d0", "link": "#a78bfa", "accent": "#a78bfa"
+                },
+                "Ocean": {
+                    "bg1": "#001220", "bg2": "#002840", "bg3": "#003860",
+                    "fg": "#e0f0ff", "link": "#4fc3f7", "accent": "#29b6f6"
+                },
+                "Forest": {
+                    "bg1": "#0a1a0a", "bg2": "#142414", "bg3": "#1a301a",
+                    "fg": "#d0e8d0", "link": "#81c784", "accent": "#66bb6a"
+                },
+                "Sunset": {
+                    "bg1": "#2a0a15", "bg2": "#3a1520", "bg3": "#4a1a25",
+                    "fg": "#ffd0d0", "link": "#ff8a80", "accent": "#ff7043"
+                },
+                "Neon": {
+                    "bg1": "#0a0a0a", "bg2": "#151515", "bg3": "#202020",
+                    "fg": "#e0e0e0", "link": "#00ff9f", "accent": "#ff00ff"
+                },
+            }
+            
+            # Use preset or derive from palette
+            theme_name = getattr(self, "_current_theme", "") or ""
+            preset = presets.get(theme_name)
+            
+            if preset:
+                vars_js = json.dumps(preset)
+            else:
+                # Derive from Qt palette with enhanced contrast
+                palette = self.palette()
+                bg1 = palette.color(QPalette.ColorRole.Base).name()
+                bg2 = palette.color(QPalette.ColorRole.AlternateBase).name()
+                bg3 = palette.color(QPalette.ColorRole.ToolTipBase).name()
+                fg = palette.color(QPalette.ColorRole.Text).name()
+                link = palette.color(QPalette.ColorRole.Link).name()
+                accent = palette.color(QPalette.ColorRole.Highlight).name()
+                vars_js = f"{{'bg1': '{bg1}', 'bg2': '{bg2}', 'bg3': '{bg3}', 'fg': '{fg}', 'link': '{link}', 'accent': '{accent}'}}"
+            
+            self.chat.page().runJavaScript(f"applyThemeVars({vars_js})")
         except Exception:
             pass
 
@@ -2036,32 +2391,6 @@ class MainWindow(QMainWindow):
                 try:
                     # Use async-safe scheduling
                     self._schedule_async(self.bridge.sendMessage, text)
-                    # Local echo only if server does NOT support IRCv3 echo-message
-                    do_local_echo = True
-                    try:
-                        if hasattr(self.bridge, "hasEchoMessage") and self.bridge.hasEchoMessage():
-                            do_local_echo = False
-                    except Exception:
-                        pass
-                    if do_local_echo:
-                        try:
-                            now_ts = time.time()
-                            self._chat_append(self._format_message_html("You", text, ts=now_ts))
-                            # Record recent outgoing to dedupe server echo
-                            try:
-                                rec = getattr(self, "_recent_outgoing", {})
-                                chan = cur or ""
-                                lst = rec.get(chan, [])
-                                lst.append((text, now_ts))
-                                # keep only last N and within window
-                                if len(lst) > 20:
-                                    lst = lst[-20:]
-                                rec[chan] = lst
-                                setattr(self, "_recent_outgoing", rec)
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
                 except Exception:
                     # Fallback: raw PRIVMSG to current target
                     if cur:
@@ -2731,19 +3060,55 @@ class MainWindow(QMainWindow):
 
     # ----- Settings management -----
     def _load_settings(self) -> None:
-        # One-time migration from legacy Peach settings to DeadHop
+        # One-time migration from legacy namespaces to DebauchedTea
         try:
             self._maybe_migrate_qsettings()
         except Exception:
             pass
-        s = QSettings("DeadHop", "DeadHopClient")
+        # Migrate existing DeadHop settings into DebauchedTea namespace
+        try:
+            old = QSettings("DeadHop", "DeadHopClient")
+            new = QSettings("DebauchedTea", "DebauchedTeaClient")
+            try:
+                if not bool(new.value("migrated_from_deadhop", False, type=bool)):
+                    keys = list(old.allKeys() or [])
+                    for k in keys:
+                        try:
+                            if hasattr(new, "contains") and new.contains(k):
+                                continue
+                        except Exception:
+                            pass
+                        try:
+                            new.setValue(k, old.value(k))
+                        except Exception:
+                            pass
+                    try:
+                        new.setValue("migrated_from_deadhop", True)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+        s = QSettings("DebauchedTea", "DebauchedTeaClient")
         self._current_theme = s.value("theme", type=str)
         self._word_wrap = s.value("word_wrap", True, type=bool)
         self._show_timestamps = s.value("show_timestamps", False, type=bool)
         self._chat_font_family = s.value("font_family", type=str)
         self._chat_font_size = s.value("font_size", type=int)
+        try:
+            self._show_quick_toolbar = s.value("ui/show_quick_toolbar", False, type=bool)
+        except Exception:
+            self._show_quick_toolbar = False
+        try:
+            self._show_browser_dock = s.value("ui/show_browser_dock", True, type=bool)
+        except Exception:
+            self._show_browser_dock = True
         # Network prefs
-        self._auto_negotiate = s.value("network/auto_negotiate", True, type=bool)
+        # The IRC engine already performs CAP negotiation (and optional SASL) internally.
+        # The UI also has a best-effort CAP negotiator that operates via raw commands,
+        # but running both can interfere with connection/join on some networks.
+        self._auto_negotiate = s.value("network/auto_negotiate", False, type=bool)
         self._prefer_tls = s.value("network/prefer_tls", True, type=bool)
         self._try_starttls = s.value("network/try_starttls", False, type=bool)
         op = s.value("opacity", 1.0, type=float)
@@ -2762,6 +3127,21 @@ class MainWindow(QMainWindow):
             sp: QByteArray | None = s.value("split_lr_state", None, type=QByteArray)
             if sp and hasattr(self, "split_lr"):
                 self.split_lr.restoreState(sp)
+        except Exception:
+            pass
+        # Dock layout/state (Qt QMainWindow saveState/restoreState)
+        try:
+            # Ensure any docks that may be referenced by restoreState already exist
+            try:
+                self._ensure_browser_dock()
+                if self.browser_dock is not None:
+                    self.browser_dock.setVisible(bool(getattr(self, "_show_browser_dock", True)))
+            except Exception:
+                pass
+            st: QByteArray | None = s.value("ui/main_window_state", None, type=QByteArray)
+            if st:
+                # Docks must already exist before restoreState
+                self.restoreState(st)
         except Exception:
             pass
         # Lists
@@ -2809,13 +3189,23 @@ class MainWindow(QMainWindow):
             self._notify_presence_sound = False
 
     def _save_settings(self) -> None:
-        s = QSettings("DeadHop", "DeadHopClient")
+        s = QSettings("DebauchedTea", "DebauchedTeaClient")
         theme = getattr(self, "_current_theme", None)
         if theme:
             s.setValue("theme", theme)
         s.setValue("word_wrap", self._word_wrap)
         s.setValue("show_timestamps", self._show_timestamps)
         s.setValue("opacity", float(self.windowOpacity()))
+        try:
+            s.setValue(
+                "ui/show_quick_toolbar", bool(getattr(self, "_show_quick_toolbar", False))
+            )
+        except Exception:
+            pass
+        try:
+            s.setValue("ui/show_browser_dock", bool(getattr(self, "_show_browser_dock", True)))
+        except Exception:
+            pass
         # Network prefs
         s.setValue("network/auto_negotiate", bool(getattr(self, "_auto_negotiate", True)))
         s.setValue("network/prefer_tls", bool(getattr(self, "_prefer_tls", True)))
@@ -2863,6 +3253,11 @@ class MainWindow(QMainWindow):
         try:
             if hasattr(self, "split_lr"):
                 s.setValue("split_lr_state", self.split_lr.saveState())
+        except Exception:
+            pass
+        # Persist dock layout/state
+        try:
+            s.setValue("ui/main_window_state", self.saveState())
         except Exception:
             pass
 
@@ -2927,131 +3322,95 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    def _toggle_quick_toolbar(self, checked: bool | None = None) -> None:
+        """Show/hide the top quick toolbar (font/theme/wrap/notify bar)."""
+        try:
+            if checked is None:
+                checked = not bool(getattr(self, "_show_quick_toolbar", False))
+            self._show_quick_toolbar = bool(checked)
+        except Exception:
+            self._show_quick_toolbar = False
+        try:
+            tb = getattr(self, "quick_toolbar", None)
+            if tb is not None:
+                tb.setVisible(bool(self._show_quick_toolbar))
+        except Exception:
+            pass
+        try:
+            act = getattr(self, "act_quick_bar", None)
+            if act is not None:
+                act.setChecked(bool(self._show_quick_toolbar))
+        except Exception:
+            pass
+        try:
+            self._save_settings()
+        except Exception:
+            pass
+
     def _init_quick_toolbar(self) -> None:
-        from PyQt6.QtWidgets import (
-            QComboBox,
-            QFileDialog,
-            QInputDialog,
-            QSizePolicy,
-            QSlider,
-        )
+        """Minimal quick toolbar: Font, Theme, Join only. Hidden by default."""
+        from PyQt6.QtWidgets import QComboBox, QSizePolicy, QSlider
 
         tb = QToolBar("Quick")
         tb.setMovable(False)
         tb.setFloatable(False)
-        # Slightly larger icons for readability
         tb.setIconSize(QSize(20, 20))
-        # Improve spacing and padding
+        # Clean dark styling with subtle transparency
         try:
-            tb.setStyleSheet("QToolBar{padding:4px; spacing:8px;} QLabel{padding:0 2px;}")
+            tb.setStyleSheet(
+                "QToolBar{padding:6px 10px; spacing:14px; background:rgba(28,28,30,0.95); "
+                "border-bottom:1px solid rgba(255,255,255,0.06);} "
+                "QLabel{padding:0 4px; color:#b0b0b0; font-size:12px;}"
+            )
         except Exception:
             pass
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
-        # Font size slider
-        tb.addWidget(QLabel(" Font "))
+        self.quick_toolbar = tb
+        tb.setVisible(bool(getattr(self, "_show_quick_toolbar", False)))
+
+        # Font size slider with label
+        tb.addWidget(QLabel("Font"))
         sld = QSlider(Qt.Orientation.Horizontal)
         sld.setMinimum(9)
         sld.setMaximum(22)
         try:
-            cur_pt = (
-                int(self._chat_font_size) if self._chat_font_size else self.font().pointSize() or 12
-            )
+            cur_pt = int(self._chat_font_size) if self._chat_font_size else 12
         except Exception:
             cur_pt = 12
-        sld.setValue(max(9, min(22, int(cur_pt))))
-        # Let the slider expand to use available space
-        try:
-            sld.setMinimumWidth(180)
-            sld.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        except Exception:
-            pass
+        sld.setValue(max(9, min(22, cur_pt)))
+        sld.setMinimumWidth(140)
+        sld.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        def on_font_changed(val: int) -> None:
-            try:
-                self._chat_font_size = int(val)
-            except Exception:
-                self._chat_font_size = 12
-            self._apply_global_font_size(int(self._chat_font_size))
+        def on_font(val: int):
+            self._chat_font_size = max(9, min(22, int(val)))
+            self._apply_global_font_size(self._chat_font_size)
             self._save_settings()
 
-        sld.valueChanged.connect(on_font_changed)
+        sld.valueChanged.connect(on_font)
         tb.addWidget(sld)
 
-        # Theme dropdown (small set for quick access)
+        # Theme dropdown
         tb.addSeparator()
-        tb.addWidget(QLabel(" Theme "))
+        tb.addWidget(QLabel("Theme"))
         cbo_theme = QComboBox()
-        themes: list[str] = []
         try:
             from qt_material import list_themes
-
-            themes = ["Material Dark", "Material Light"] + [
-                t for t in list(list_themes()) if t not in ("Material Dark", "Material Light")
-            ]
+            themes = ["Material Dark", "Material Light"] + [t for t in list(list_themes()) if t not in ("Material Dark", "Material Light")]
         except Exception:
-            themes = ["Material Dark", "Material Light"]
+            themes = ["Material Dark", "Material Light", "Midnight", "Ocean", "Forest", "Sunset"]
         cbo_theme.addItems(themes)
         if self._current_theme and self._current_theme in themes:
             cbo_theme.setCurrentText(self._current_theme)
-        try:
-            cbo_theme.setMinimumWidth(160)
-            from PyQt6.QtWidgets import QComboBox as _QB
-
-            cbo_theme.setSizeAdjustPolicy(_QB.SizeAdjustPolicy.AdjustToContentsOnFirstShow)
-        except Exception:
-            pass
-
-        def on_theme(name: str) -> None:
-            self._current_theme = name
-            try:
-                self._apply_qt_material(name)
-            except Exception:
-                pass
-            self._save_settings()
-
-        cbo_theme.currentTextChanged.connect(on_theme)
+        cbo_theme.setMinimumWidth(150)
+        cbo_theme.currentTextChanged.connect(self._on_theme_changed)
         tb.addWidget(cbo_theme)
 
-        # Wrap dropdown
+        # Join channel
         tb.addSeparator()
-        tb.addWidget(QLabel(" Wrap "))
-        cbo_wrap = QComboBox()
-        cbo_wrap.addItems(["On", "Off"])
-        cbo_wrap.setCurrentText("On" if self._word_wrap else "Off")
-        try:
-            cbo_wrap.setMinimumWidth(90)
-        except Exception:
-            pass
-
-        def on_wrap(txt: str) -> None:
-            self._word_wrap = txt == "On"
-            self._set_word_wrap(self._word_wrap)
-            self._save_settings()
-
-        cbo_wrap.currentTextChanged.connect(on_wrap)
-        tb.addWidget(cbo_wrap)
-
-        # Timestamps dropdown
-        tb.addSeparator()
-        tb.addWidget(QLabel(" Timestamps "))
-        cbo_ts = QComboBox()
-        cbo_ts.addItems(["Off", "On"])  # default off like settings
-        cbo_ts.setCurrentText("On" if self._show_timestamps else "Off")
-
-        def on_ts(txt: str) -> None:
-            self._show_timestamps = txt == "On"
-            self._set_timestamps(self._show_timestamps)
-            self._save_settings()
-
-        cbo_ts.currentTextChanged.connect(on_ts)
-        tb.addWidget(cbo_ts)
-
-        # Join channel quick control
-        tb.addSeparator()
-        tb.addWidget(QLabel(" Join "))
+        tb.addWidget(QLabel("Join"))
         join_box = QLineEdit()
         join_box.setPlaceholderText("#channel")
-        join_box.setFixedWidth(140)
+        join_box.setFixedWidth(120)
 
         def do_join():
             ch = join_box.text().strip()
@@ -3061,222 +3420,12 @@ class MainWindow(QMainWindow):
 
         join_box.returnPressed.connect(do_join)
         tb.addWidget(join_box)
-        btn_join = QPushButton("+")
-        btn_join.setFixedWidth(22)
+        btn_join = QPushButton("→")
+        btn_join.setFixedWidth(30)
+        btn_join.setStyleSheet("QPushButton{background:rgba(80,130,240,0.8); color:white; border:none; border-radius:4px;} QPushButton:hover{background:rgba(100,150,255,0.9);}")
         btn_join.clicked.connect(do_join)
         tb.addWidget(btn_join)
-
-        # Change nick quick control (button opens prompt)
-        tb.addSeparator()
-        btn_nick = QPushButton("Nick…")
-
-        def on_nick():
-            try:
-                cur_nick = ""  # we may not have it; allow blank
-                new, ok = QInputDialog.getText(self, "Change Nick", "New nickname:", text=cur_nick)
-                if ok and new.strip():
-                    self._change_nick(new.strip())
-            except Exception:
-                pass
-
-        btn_nick.clicked.connect(on_nick)
-        tb.addWidget(btn_nick)
-
-        # Quick user mode toggles (+i, -i, +x, -x)
-        tb.addSeparator()
-        tb.addWidget(QLabel(" Me "))
-        btn_ui = QPushButton("+i")
-        btn_ux = QPushButton("+x")
-        btn_di = QPushButton("-i")
-        btn_dx = QPushButton("-x")
-        btn_ui.setFixedWidth(28)
-        btn_ux.setFixedWidth(28)
-        btn_di.setFixedWidth(28)
-        btn_dx.setFixedWidth(28)
-        try:
-            btn_ui.clicked.connect(lambda: self.bridge.setMyModes("+i"))
-            btn_di.clicked.connect(lambda: self.bridge.setMyModes("-i"))
-            btn_ux.clicked.connect(lambda: self.bridge.setMyModes("+x"))
-            btn_dx.clicked.connect(lambda: self.bridge.setMyModes("-x"))
-        except Exception:
-            pass
-        tb.addWidget(btn_ui)
-        tb.addWidget(btn_di)
-        tb.addWidget(btn_ux)
-        tb.addWidget(btn_dx)
-
-        # Notifications toggles
-        tb.addSeparator()
-        tb.addWidget(QLabel(" Notify "))
-        chk_toast = QCheckBox("Toast")
-        chk_tray = QCheckBox("Tray")
-        chk_sound = QCheckBox("Sound")
-        chk_toast.setChecked(getattr(self, "_notify_toast", True))
-        chk_tray.setChecked(getattr(self, "_notify_tray", True))
-        chk_sound.setChecked(getattr(self, "_notify_sound", True))
-
-        def on_toast(v: bool) -> None:
-            self._notify_toast = bool(v)
-            try:
-                s = QSettings("DeadHop", "DeadHopClient")
-                s.setValue("notify/toast", bool(v))
-            except Exception:
-                pass
-
-        def on_tray(v: bool) -> None:
-            self._notify_tray = bool(v)
-            try:
-                s = QSettings("DeadHop", "DeadHopClient")
-                s.setValue("notify/tray", bool(v))
-            except Exception:
-                pass
-
-        def on_sound(v: bool) -> None:
-            self._notify_sound = bool(v)
-            try:
-                s = QSettings("DeadHop", "DeadHopClient")
-                s.setValue("notify/sound", bool(v))
-            except Exception:
-                pass
-
-        chk_toast.toggled.connect(on_toast)
-        chk_tray.toggled.connect(on_tray)
-        chk_sound.toggled.connect(on_sound)
-        tb.addWidget(chk_toast)
-        tb.addWidget(chk_tray)
-        tb.addWidget(chk_sound)
-
-        # Sound pickers (message/highlight) and volume
-        try:
-            tb.addWidget(QLabel(" Msg "))
-            btn_msg = QPushButton("Pick…")
-
-            def pick_msg() -> None:
-                try:
-                    fn, _ = QFileDialog.getOpenFileName(
-                        self, "Choose Message Sound", filter="Sounds (*.wav *.ogg)"
-                    )
-                    if fn:
-                        from PyQt6.QtCore import QUrl
-
-                        (
-                            self._se_msg.setSource(QUrl.fromLocalFile(fn))
-                            if getattr(self, "_se_msg", None)
-                            else None
-                        )
-                        s = QSettings("DeadHop", "DeadHopClient")
-                        s.setValue("notify/sound_msg", fn)
-                except Exception:
-                    pass
-
-            btn_msg.clicked.connect(pick_msg)
-            tb.addWidget(btn_msg)
-
-            tb.addWidget(QLabel(" HL "))
-            btn_hl = QPushButton("Pick…")
-
-            def pick_hl() -> None:
-                try:
-                    fn, _ = QFileDialog.getOpenFileName(
-                        self, "Choose Highlight Sound", filter="Sounds (*.wav *.ogg)"
-                    )
-                    if fn:
-                        from PyQt6.QtCore import QUrl
-
-                        (
-                            self._se_hl.setSource(QUrl.fromLocalFile(fn))
-                            if getattr(self, "_se_hl", None)
-                            else None
-                        )
-                        s = QSettings("DeadHop", "DeadHopClient")
-                        s.setValue("notify/sound_hl", fn)
-                except Exception:
-                    pass
-
-            btn_hl.clicked.connect(pick_hl)
-            tb.addWidget(btn_hl)
-
-            tb.addWidget(QLabel(" Friend "))
-            btn_pr = QPushButton("Pick…")
-
-            def pick_pr() -> None:
-                try:
-                    fn, _ = QFileDialog.getOpenFileName(
-                        self, "Choose Friend Online Sound", filter="Sounds (*.wav *.ogg)"
-                    )
-                    if fn:
-                        from PyQt6.QtCore import QUrl
-
-                        (
-                            self._se_presence.setSource(QUrl.fromLocalFile(fn))
-                            if getattr(self, "_se_presence", None)
-                            else None
-                        )
-                        s = QSettings("DeadHop", "DeadHopClient")
-                        s.setValue("notify/sound_presence", fn)
-                except Exception:
-                    pass
-
-            btn_pr.clicked.connect(pick_pr)
-            tb.addWidget(btn_pr)
-
-            # Toggle for friend-online sound
-            try:
-                chk_pr = QCheckBox("Friend sound")
-                chk_pr.setChecked(bool(getattr(self, "_notify_presence_sound", False)))
-
-                def on_pr(v: bool) -> None:
-                    try:
-                        self._notify_presence_sound = bool(v)
-                        s = QSettings("DeadHop", "DeadHopClient")
-                        s.setValue("notify/presence_sound", bool(v))
-                    except Exception:
-                        pass
-
-                chk_pr.toggled.connect(on_pr)
-                tb.addWidget(chk_pr)
-            except Exception:
-                pass
-
-            tb.addWidget(QLabel(" Vol "))
-            s_vol = QSlider(Qt.Orientation.Horizontal)
-            s_vol.setMinimum(0)
-            s_vol.setMaximum(100)
-            try:
-                s = QSettings("DeadHop", "DeadHopClient")
-                cur = float(s.value("notify/sound_volume", 0.7))
-            except Exception:
-                cur = 0.7
-            s_vol.setValue(int(cur * 100))
-
-            def on_vol(v: int) -> None:
-                try:
-                    vol = max(0.0, min(1.0, v / 100.0))
-                    if getattr(self, "_se_msg", None):
-                        try:
-                            self._se_msg.setVolume(vol)
-                        except Exception:
-                            pass
-                    if getattr(self, "_se_hl", None):
-                        try:
-                            self._se_hl.setVolume(vol)
-                        except Exception:
-                            pass
-                    if getattr(self, "_se_presence", None):
-                        try:
-                            self._se_presence.setVolume(vol)
-                        except Exception:
-                            pass
-                    s = QSettings("DeadHop", "DeadHopClient")
-                    s.setValue("notify/sound_volume", float(vol))
-                except Exception:
-                    pass
-
-            s_vol.valueChanged.connect(on_vol)
-            s_vol.setFixedWidth(100)
-            tb.addWidget(s_vol)
-        except Exception:
-            pass
+        self._join_box = join_box  # keep reference
 
     def _init_notifications(self) -> None:
         """Initialize tray icon and sound effects (best-effort)."""
@@ -4148,6 +4297,21 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    def _on_theme_changed(self, name: str) -> None:
+        """Handle theme change from Quick Bar dropdown."""
+        if not name:
+            return
+        self._current_theme = name
+        try:
+            self._apply_qt_material(name)
+        except Exception:
+            try:
+                self._apply_theme(name)
+            except Exception:
+                pass
+        self._save_settings()
+        self._sync_theme_actions()
+
     # ----- Notifications & Highlights -----
     def _set_sound_enabled(self, en: bool) -> None:
         self._sound_enabled = en
@@ -4202,6 +4366,29 @@ class MainWindow(QMainWindow):
         except Exception:
             rendered = None
 
+        # Deduplicate against optimistic local echo BEFORE caching to scrollback.
+        # Otherwise duplicates won't show immediately, but will reappear on refocus/replay.
+        try:
+            if (
+                target
+                and self._my_nick
+                and nick
+                and nick.lower() == self._my_nick.lower()
+                and getattr(self, "_recent_outgoing", None) is not None
+            ):
+                rec = getattr(self, "_recent_outgoing", {})
+                lst = rec.get(target, [])
+                if lst:
+                    cutoff = ts - 5.0
+                    lst = [(t, tts) for (t, tts) in lst if tts >= cutoff]
+                    rec[target] = lst
+                    setattr(self, "_recent_outgoing", rec)
+                    for t, _tts in lst:
+                        if t == msg:
+                            return
+        except Exception:
+            pass
+
         # Append to scrollback buffer for this composite label
         try:
             if target and rendered:
@@ -4240,7 +4427,17 @@ class MainWindow(QMainWindow):
                                     return
                 except Exception:
                     pass
-                self._chat_append(rendered)
+                # IMPORTANT: do not call _chat_append here.
+                # _on_message already cached the line into per-channel scrollback;
+                # _chat_append would cache it a second time, causing duplicate scrollback on refocus.
+                try:
+                    if getattr(self, "_chat_ready", False):
+                        self.chat.page().runJavaScript(f"appendMessage({json.dumps(rendered)})")
+                        self.chat.page().runJavaScript("scrollToBottom()")
+                    else:
+                        getattr(self, "_chat_buf", []).append(rendered)
+                except Exception:
+                    pass
             except Exception:
                 pass
         # URL grabber
@@ -4349,15 +4546,29 @@ class MainWindow(QMainWindow):
             pass
 
     def _on_names(self, channel: str, names: list[str]) -> None:
-        # Merge incremental updates into cache keyed by channel label
+        # Treat NAMES as a full snapshot for the channel.
+        # Also normalize entries that may include mode prefixes and userhost-in-names.
+        def _norm(n: str) -> str:
+            try:
+                s = str(n or "").strip()
+                if not s:
+                    return ""
+                # strip common mode/status prefixes
+                s = s.lstrip("~&@%+ ")
+                # userhost-in-names: nick!user@host -> nick
+                if "!" in s:
+                    s = s.split("!", 1)[0]
+                return s.strip()
+            except Exception:
+                return ""
+
         try:
-            existing = set(self._names_by_channel.get(channel, []))
-            incoming = set(names or [])
-            merged = sorted(existing.union(incoming))
-            self._names_by_channel[channel] = merged
+            cleaned = [_norm(x) for x in (names or [])]
+            cleaned = [x for x in cleaned if x]
+            # de-dupe while preserving sorted display
+            self._names_by_channel[channel] = sorted(set(cleaned))
         except Exception:
-            # Fallback: replace cache
-            self._names_by_channel[channel] = list(names or [])
+            self._names_by_channel[channel] = [x for x in (names or []) if x]
         # Only update the visible list if this channel is the active one
         cur = self.bridge.current_channel()
         if cur and channel == cur:
@@ -4574,13 +4785,15 @@ class MainWindow(QMainWindow):
         # Emit a system message about the topic change
         try:
             who = actor or "server"
-            self._channel_emit(comp, f"• {who} set topic: {topic}")
+            ch = comp.split(":", 1)[1] if ":" in comp else comp
+            self._channel_emit(comp, f"• {who} set topic for {ch}: {topic}")
         except Exception:
             pass
 
     def _on_channel_mode(self, comp: str, actor: str, modes: str) -> None:
         ch = comp.split(":", 1)[1] if ":" in comp else comp
-        self._channel_emit(comp, f"• mode/{ch} {modes}")
+        who = actor or "server"
+        self._channel_emit(comp, f"• {who} set modes on {ch}: {modes}")
 
     def _on_channel_mode_users(self, comp: str, changes: list) -> None:
         # Summarize user mode changes, e.g., +o nick, -v nick
@@ -4591,7 +4804,7 @@ class MainWindow(QMainWindow):
                 parts.append(f"{sign}{mode} {nick}")
             if parts:
                 ch = comp.split(":", 1)[1] if ":" in comp else comp
-                self._channel_emit(comp, f"• mode/{ch} " + " ".join(parts))
+                self._channel_emit(comp, f"• Mode changes on {ch}: " + " ".join(parts))
         except Exception:
             pass
 

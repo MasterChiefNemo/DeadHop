@@ -82,7 +82,18 @@ class ServerEditorDialog(QDialog):
         except Exception:
             self.ed_port.setValue(6697)
         self.chk_tls.setChecked(bool(s.value(f"{base}/tls", True, bool)))
-        self.ed_channels.setText(s.value(f"{base}/channels", "", str) or "")
+        # Channels may be stored as list[str] (preferred) or as a comma-separated string (legacy).
+        try:
+            ch_val = s.value(f"{base}/channels", [], type=list)
+            if isinstance(ch_val, list):
+                self.ed_channels.setText(",".join([str(c).strip() for c in ch_val if str(c).strip()]))
+            else:
+                self.ed_channels.setText(str(ch_val or ""))
+        except Exception:
+            try:
+                self.ed_channels.setText(s.value(f"{base}/channels", "", str) or "")
+            except Exception:
+                self.ed_channels.setText("")
         self.ed_password.setText(s.value(f"{base}/password", "", str) or "")
         self.ed_sasl_user.setText(s.value(f"{base}/sasl_user", "", str) or "")
         self.chk_ignore_invalid.setChecked(
@@ -93,6 +104,19 @@ class ServerEditorDialog(QDialog):
         name = self.name
         host = (self.ed_host.text() or "").strip()
         port = int(self.ed_port.value())
+        # Normalize channels to list[str]
+        try:
+            raw = (self.ed_channels.text() or "").strip()
+            channels = [c.strip() for c in raw.split(",") if c.strip()]
+            # Ensure leading '#' for typical channels
+            norm_channels: list[str] = []
+            for c in channels:
+                if not (c.startswith("#") or c.startswith("&")):
+                    c = "#" + c
+                norm_channels.append(c)
+            channels = list(dict.fromkeys(norm_channels))
+        except Exception:
+            channels = []
         if not name:
             QMessageBox.warning(self, "Missing name", "Please enter a profile name.")
             return
@@ -116,7 +140,8 @@ class ServerEditorDialog(QDialog):
         s.setValue(f"{base}/host", host)
         s.setValue(f"{base}/port", port)
         s.setValue(f"{base}/tls", bool(self.chk_tls.isChecked()))
-        s.setValue(f"{base}/channels", (self.ed_channels.text() or "").strip())
+        # Store channels as list[str] (preferred), to match the rest of the app.
+        s.setValue(f"{base}/channels", list(channels))
         s.setValue(f"{base}/password", self.ed_password.text())
         s.setValue(f"{base}/sasl_user", (self.ed_sasl_user.text() or "").strip())
         s.setValue(f"{base}/ignore_invalid_certs", bool(self.chk_ignore_invalid.isChecked()))

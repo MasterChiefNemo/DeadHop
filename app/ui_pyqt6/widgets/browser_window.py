@@ -27,7 +27,7 @@ class BrowserWindow(QMainWindow):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("DeadHop – Browser")
+        self.setWindowTitle("DebauchedTea – Browser")
         self.resize(1100, 800)
 
         # Lazy import WebEngine modules to avoid early initialization
@@ -101,7 +101,7 @@ class BrowserWindow(QMainWindow):
         self.act_stop = QAction(QIcon.fromTheme("process-stop"), "Stop", self)
         self.act_stop.triggered.connect(self.view.stop)
         self.act_home = QAction(QIcon.fromTheme("go-home"), "Home", self)
-        self.act_home.triggered.connect(lambda: self.open_url("https://duckduckgo.com"))
+        self.act_home.triggered.connect(lambda: self.open_url("https://debauchedtea.party/"))
 
         for a in (self.act_back, self.act_forward, self.act_reload, self.act_stop, self.act_home):
             tb.addAction(a)

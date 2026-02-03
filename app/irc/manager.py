@@ -93,6 +93,8 @@ class IRCManager:
         self.debug: bool = False
         # MONITOR tracked nicks cache
         self._monitor: set[str] = set()
+        # Buffer NAMES (353) chunks until end-of-names (366)
+        self._names_buf: dict[str, list[str]] = {}
 
     async def connect(self):
         ctx = None
@@ -620,9 +622,25 @@ class IRCManager:
                             bychan = self._batch_names.setdefault(bid, {})
                             bychan.setdefault(ch, []).extend(names)
                         else:
-                            # Pass raw names with prefixes; model will parse modes
-                            if self.on_names:
-                                self.on_names(ch, names)
+                            # Buffer until 366 so UI receives full list even when server
+                            # splits NAMES across multiple 353 lines.
+                            try:
+                                self._names_buf.setdefault(ch, []).extend(names)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    continue
+
+                # End of NAMES list
+                if cmd == "366":
+                    try:
+                        # Typical: :server 366 <me> <chan> :End of /NAMES list.
+                        parts2 = rest.split()
+                        ch = parts2[2] if len(parts2) > 2 else ""
+                        buf = self._names_buf.pop(ch, []) if ch else []
+                        if buf and self.on_names:
+                            self.on_names(ch, buf)
                     except Exception:
                         pass
                     continue

@@ -22,7 +22,9 @@ os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
 # Prefer ANGLE/D3D11 for Qt Quick/scene graph (Qt6 RHI); safe no-op on non-Windows.
 os.environ.setdefault("QSG_RHI_BACKEND", "d3d11")
 
-APP_NAME = "DeadHop"
+ORG_NAME = "DebauchedTea"
+APP_NAME = "DebauchedTea"
+SITE_URL = "https://debauchedtea.party/"
 
 # Locate resources (icons)
 _ICONS_DIR = Path(__file__).resolve().parent / "resources" / "icons"
@@ -41,7 +43,21 @@ def app_icon() -> QIcon:
     # Import lazily to avoid E402 and heavy module init during module import
     from PyQt6.QtGui import QIcon
 
-    # Prefer a connect/plug icon for taskbar if available
+    # 1) Prefer site favicon (runtime fetch)
+    try:
+        import urllib.request
+
+        from PyQt6.QtGui import QPixmap
+
+        with urllib.request.urlopen(SITE_URL.rstrip("/") + "/favicon.ico", timeout=3) as resp:
+            data = resp.read()
+        pm = QPixmap()
+        if pm.loadFromData(data):
+            return QIcon(pm)
+    except Exception:
+        pass
+
+    # 2) Prefer a connect/plug icon for taskbar if available
     candidates = [
         # Explicitly prefer the custom Windows .ico if present
         _CUSTOM_ICONS_DIR / "main app pixels.ico",
@@ -85,6 +101,10 @@ def main() -> int:
     os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
     os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
     app = QApplication(sys.argv)
+    try:
+        app.setOrganizationName(ORG_NAME)
+    except Exception:
+        pass
     app.setApplicationName(APP_NAME)
     app.setWindowIcon(app_icon())
 

@@ -29,7 +29,7 @@ from app.ui_pyqt6.delegates.elide_delegate import ElideDelegate
 
 
 class WelcomeDialog(QDialog):
-    """DeadHop branded welcome/splash dialog.
+    """DebauchedTea branded welcome/splash dialog.
 
     Lets the user:
       - Pick and connect to a saved server
@@ -39,7 +39,7 @@ class WelcomeDialog(QDialog):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Welcome to DeadHop")
+        self.setWindowTitle("Welcome to DebauchedTea")
         self.setModal(True)
 
         # Frameless window that can be styled
@@ -89,13 +89,13 @@ class WelcomeDialog(QDialog):
 
         branding = QVBoxLayout()
         branding.setSpacing(2)
-        title = QLabel("DeadHop")
+        title = QLabel("DebauchedTea")
         title_font = self.font()
         title_font.setPointSize(18)
         title_font.setBold(True)
         title.setFont(title_font)
         branding.addWidget(title)
-        subtitle = QLabel("Fast. Minimal. IRC that slaps.")
+        subtitle = QLabel("IRC on debauchedtea.party")
         branding.addWidget(subtitle)
         header.addLayout(branding)
         card_layout.addLayout(header)
@@ -266,14 +266,27 @@ class WelcomeDialog(QDialog):
         name = self.selected_server_name
         if not name:
             return
-        dlg = ServerEditorDialog(self, name)
-        if dlg.exec():
-            self._populate_servers()
-            # Reselect the edited server
-            for i in range(self.server_list.count()):
-                if self.server_list.item(i).data(Qt.ItemDataRole.UserRole) == dlg.name:
-                    self.server_list.setCurrentRow(i)
-                    break
+        try:
+            dlg = ServerEditorDialog(self, name)
+            if dlg.exec():
+                self._populate_servers()
+                # Reselect the edited server
+                for i in range(self.server_list.count()):
+                    if self.server_list.item(i).data(Qt.ItemDataRole.UserRole) == dlg.name:
+                        self.server_list.setCurrentRow(i)
+                        break
+        except Exception as e:
+            try:
+                import traceback
+
+                QMessageBox.critical(
+                    self,
+                    "Edit Server Failed",
+                    f"Could not open the server editor for '{name}'.\n\n{type(e).__name__}: {e}\n\n"
+                    + traceback.format_exc(),
+                )
+            except Exception:
+                pass
 
     def _on_delete(self) -> None:
         name = self.selected_server_name

@@ -75,7 +75,8 @@ class SidebarTree(QTreeWidget):
         Composite format: "network:#channel". For AI entries, pass the full label (e.g. "[AI:llama]") and they will be grouped under "AI" network.
         This method is additive and also removes items that are no longer present.
         """
-        desired: set[str] = set(channels or [])
+        ordered = list(channels or [])
+        desired: set[str] = set(ordered)
         # Remove stale items
         for full, item in list(self._items.items()):
             if full not in desired:
@@ -100,8 +101,8 @@ class SidebarTree(QTreeWidget):
                     del self._nets[net]
             except Exception:
                 pass
-        # Add missing
-        for full in desired:
+        # Add missing (preserve input order)
+        for full in ordered:
             if full in self._items:
                 continue
             # Determine network bucket and display text
